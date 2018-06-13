@@ -2,6 +2,7 @@
  * drivers/gpu/ion/ion_system_heap.c
  *
  * Copyright (C) 2011 Google, Inc.
+ * Copyright (c) 2011-2018, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -333,7 +334,11 @@ void ion_system_heap_destroy(struct ion_heap *heap)
 	int i;
 
 	for (i = 0; i < num_orders; i++)
-		ion_page_pool_destroy(sys_heap->pools[i]);
+		if (sys_heap->pools[i]) {
+			ion_page_pool_destroy(sys_heap->pools[i]);
+			sys_heap->pools[i] = NULL;
+		}
+
 	kfree(sys_heap->pools);
 	kfree(sys_heap);
 }
