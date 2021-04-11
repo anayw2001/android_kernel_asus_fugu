@@ -34,9 +34,9 @@
 
 static void do_suspend_sync(struct work_struct *work);
 
-const char *const pm_states[PM_SUSPEND_MAX] = {
+struct pm_sleep_state pm_states[PM_SUSPEND_MAX] = {
 #ifdef CONFIG_EARLYSUSPEND
-	[PM_SUSPEND_ON]	= { .label = "on", },
+	[PM_SUSPEND_ON]	= { .label = "on", .state = PM_SUSPEND_ON },
 #endif
 	[PM_SUSPEND_FREEZE] = { .label = "freeze", .state = PM_SUSPEND_FREEZE },
 	[PM_SUSPEND_STANDBY] = { .label = "standby", },
