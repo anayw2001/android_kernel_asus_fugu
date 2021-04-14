@@ -63,6 +63,9 @@ else
         # Don't autogenerate MMX or SSE instructions
         KBUILD_CFLAGS += -mno-mmx -mno-sse
 
+        # Don't autogenerate MMX or SSE instructions
+        KBUILD_CFLAGS += -mno-mmx -mno-sse
+
 	# Use -mpreferred-stack-boundary=3 if supported.
 	KBUILD_CFLAGS += $(call cc-option,-mpreferred-stack-boundary=3)
 

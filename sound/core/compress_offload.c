@@ -44,6 +44,13 @@
 #include <sound/compress_offload.h>
 #include <sound/compress_driver.h>
 
+/* struct snd_compr_codec_caps overflows the ioctl bit size for some
+ * architectures, so we need to disable the relevant ioctls.
+ */
+#if _IOC_SIZEBITS < 14
+#define COMPR_CODEC_CAPS_OVERFLOW
+#endif
+
 /* TODO:
  * - add substream support for multiple devices in case of
  *	SND_DYNAMIC_MINORS is not used
@@ -134,7 +141,7 @@ static int snd_compr_open(struct inode *inode, struct file *f)
 		kfree(data);
 	}
 	snd_card_unref(compr->card);
-	return 0;
+	return ret;
 }
 
 static int snd_compr_free(struct inode *inode, struct file *f)
@@ -449,6 +456,7 @@ out:
 	return retval;
 }
 
+#ifndef COMPR_CODEC_CAPS_OVERFLOW
 static int
 snd_compr_get_codec_caps(struct snd_compr_stream *stream, unsigned long arg)
 {
@@ -472,6 +480,7 @@ out:
 	kfree(caps);
 	return retval;
 }
+#endif /* !COMPR_CODEC_CAPS_OVERFLOW */
 
 /* revisit this with snd_pcm_preallocate_xxx */
 static int snd_compr_allocate_buffer(struct snd_compr_stream *stream,
@@ -690,8 +699,6 @@ int snd_compr_stop(struct snd_compr_stream *stream)
 	if (stream->runtime->state != SNDRV_PCM_STATE_PREPARED)
 		retval = stream->ops->trigger(stream, SNDRV_PCM_TRIGGER_STOP);
 	if (!retval) {
-		stream->runtime->state = SNDRV_PCM_STATE_SETUP;
-		wake_up(&stream->runtime->sleep);
 		snd_compr_drain_notify(stream);
 		stream->runtime->total_bytes_available = 0;
 		stream->runtime->total_bytes_transferred = 0;
@@ -702,6 +709,8 @@ EXPORT_SYMBOL(snd_compr_stop);
 
 static int snd_compress_wait_for_drain(struct snd_compr_stream *stream)
 {
+	int ret;
+
 	/*
 	 * We are called with lock held. So drop the lock while we wait for
 	 * drain complete notfication from the driver
@@ -713,12 +722,24 @@ static int snd_compress_wait_for_drain(struct snd_compr_stream *stream)
 	stream->runtime->state = SNDRV_PCM_STATE_DRAINING;
 	mutex_unlock(&stream->device->lock);
 
-	wait_event(stream->runtime->wait, stream->runtime->drain_wake);
+	/* we wait for drain to complete here, drain can return when
+	 * interruption occurred, wait returned error or success.
+	 * For the first two cases we don't do anything different here and
+	 * return after waking up
+	 */
+
+	ret = wait_event_interruptible(stream->runtime->sleep,
+			(stream->runtime->state != SNDRV_PCM_STATE_DRAINING));
+	if (ret == -ERESTARTSYS)
+		pr_debug("wait aborted by a signal");
+	else if (ret)
+		pr_debug("wait for drain failed with %d\n", ret);
+
 
 	wake_up(&stream->runtime->sleep);
 	mutex_lock(&stream->device->lock);
 
-	return 0;
+	return ret;
 }
 
 static int snd_compr_drain(struct snd_compr_stream *stream)
@@ -727,8 +748,6 @@ static int snd_compr_drain(struct snd_compr_stream *stream)
 
 	if (stream->runtime->state == SNDRV_PCM_STATE_SETUP)
 		return -EPERM;
-
-	stream->runtime->drain_wake = 0;
 
 	/* this is hackish for our tree but for now lets carry it while we fix
 	 * usermode behaviour
@@ -739,14 +758,12 @@ static int snd_compr_drain(struct snd_compr_stream *stream)
 		return 0;
 
 	if (retval) {
-		pr_err("SND_COMPR_TRIGGER_DRAIN failed %d\n", retval);
+		pr_debug("SND_COMPR_TRIGGER_DRAIN failed %d\n", retval);
 		wake_up(&stream->runtime->sleep);
 		return retval;
 	}
 
-	retval = snd_compress_wait_for_drain(stream);
-	stream->runtime->state = SNDRV_PCM_STATE_SETUP;
-	return retval;
+	return snd_compress_wait_for_drain(stream);
 }
 
 static int snd_compr_next_track(struct snd_compr_stream *stream)
@@ -782,22 +799,19 @@ static int snd_compr_partial_drain(struct snd_compr_stream *stream)
 	if (stream->next_track == false)
 		return -EPERM;
 
-	stream->runtime->drain_wake = 0;
 	if (stream->runtime->state != SNDRV_PCM_STATE_PREPARED)
 		retval = stream->ops->trigger(stream, SND_COMPR_TRIGGER_PARTIAL_DRAIN);
 	else
 		return 0;
 
 	if (retval) {
-		pr_err("Partial drain returned failure\n");
+		pr_debug("Partial drain returned failure\n");
 		wake_up(&stream->runtime->sleep);
 		return retval;
 	}
 
 	stream->next_track = false;
-	retval = snd_compress_wait_for_drain(stream);
-	stream->runtime->state = SNDRV_PCM_STATE_SETUP;
-	return retval;
+	return snd_compress_wait_for_drain(stream);
 }
 
 static long snd_compr_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
@@ -820,9 +834,11 @@ static long snd_compr_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 	case _IOC_NR(SNDRV_COMPRESS_GET_CAPS):
 		retval = snd_compr_get_caps(stream, arg);
 		break;
+#ifndef COMPR_CODEC_CAPS_OVERFLOW
 	case _IOC_NR(SNDRV_COMPRESS_GET_CODEC_CAPS):
 		retval = snd_compr_get_codec_caps(stream, arg);
 		break;
+#endif
 	case _IOC_NR(SNDRV_COMPRESS_SET_PARAMS):
 		retval = snd_compr_set_params(stream, arg);
 		break;

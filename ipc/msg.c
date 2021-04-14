@@ -218,7 +218,8 @@ static int newque(struct ipc_namespace *ns, struct ipc_params *params)
 		return id;
 	}
 
-	msg_unlock(msq);
+	ipc_unlock_object(&msq->q_perm);
+	rcu_read_unlock();
 
 	return msq->q_perm.id;
 }
@@ -882,6 +883,8 @@ long do_msgrcv(int msqid, void __user *buf, size_t bufsz, long msgtyp, int msgfl
 		return -EINVAL;
 
 	if (msgflg & MSG_COPY) {
+		if ((msgflg & MSG_EXCEPT) || !(msgflg & IPC_NOWAIT))
+			return -EINVAL;
 		copy = prepare_copy(buf, min_t(size_t, bufsz, ns->msg_ctlmax));
 		if (IS_ERR(copy))
 			return PTR_ERR(copy);
