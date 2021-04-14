@@ -75,12 +75,13 @@ struct ion_allocation_dc_private_data
 /* BEGIN Keep in sync with ion.c */
 
 struct ion_handle {
-	struct kref ref;
-	struct ion_client *client;
-	struct ion_buffer *buffer;
-	struct rb_node node;
-	unsigned int kmap_cnt;
-	int id;
+        struct kref ref;
+        unsigned int user_ref_count;
+        struct ion_client *client;
+        struct ion_buffer *buffer;
+        struct rb_node node;
+        unsigned int kmap_cnt;
+        int id;
 };
 
 /* END-- Keep in sync with ion.c */
